@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import sys,os,json
+import sys,os,json,codecs
 import time
 import datetime
 
@@ -18,11 +18,28 @@ from module.console.dashboard import dashboard
 
 inq = queues.Queue()
 
+async def async_fetch_https(url,scenarioId,idx):
+    print('[%s] async_fetch_https | worker[%d] | scenario[%s] | url[%s]'%(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), idx, scenarioId, url))    
+    header = {
+        #"User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/47.0.2526.111 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) VAR/1.0.0.1"
+    }
+    props = ApplicationContext.getContext().getInstance( p_name='var.application.configuration' )
+    datadir = props.getProperty(p_key='application.persistence.rootdir')
+    http_client = httpclient.AsyncHTTPClient()
+    try:
+        response = await http_client.fetch(url,method='GET',headers=header)
+    except Exception as e:
+        print("Error: %s" % e)
+    else:
+        fp = open(datadir+"/"+scenarioId, 'wb+')
+        fp.write(response.body)
+        
 async def fetch_https(url,scenarioId,idx):
-    if scenarioId == 'sid-003' or scenarioId == 'sid-007' or scenarioId == 'sid-0013' or scenarioId == 'sid-0016':
-        await gen.sleep(15)
+    #if scenarioId == 'sid-003' or scenarioId == 'sid-007' or scenarioId == 'sid-0013' or scenarioId == 'sid-0016':
+     #   await gen.sleep(15)
     
-    print('worker-%d starts fetch %s'%(idx, scenarioId))    
+    print('[%s] fetch_https | worker[%d] | scenario[%s] | url[%s]'%(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), idx, scenarioId, url))    
     header = {
         #"User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/47.0.2526.111 Safari/537.36"
         "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) VAR/1.0.0.1"
@@ -33,8 +50,15 @@ async def fetch_https(url,scenarioId,idx):
     #print (data) # 打印网页的内容
     props = ApplicationContext.getContext().getInstance( p_name='var.application.configuration' )
     datadir = props.getProperty(p_key='application.persistence.rootdir')
-    fp = open(datadir+"/"+scenarioId, 'wb+')
-    fp.write(response.data)
+    if url == 'http://www.160ys.com/forum-39-1.html':
+        fp = codecs.open(datadir+"/"+scenarioId, 'w+', encoding='gbk')
+        data = response.data.decode('gbk')
+        #print(data.encode('latin-1').decode('gbk').encode('utf-8'))
+        fp.write(data)
+        fp.close()
+    else:
+        fp = open(datadir+"/"+scenarioId, 'wb+')
+        fp.write(response.data)
 
 async def worker(idx):
     async for task in inq:
@@ -46,14 +70,21 @@ async def worker(idx):
                         #await fetch_url(p_url=url)
                         #print('worker-%d begin fetch url(%s) - %s'%(idx, url, datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
                         #await gen.sleep(5)
-                        await fetch_https(url,scenarioId,idx)
-                        
+                        #await fetch_https(url,scenarioId,idx)
+                        await async_fetch_https(url,scenarioId,idx)
+                        print('[%s] fetch_https ends | worker[%d] | scenario[%s] | url[%s]'%(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), idx, scenarioId, url))    
+
                         #print('worker-%d end fetch url - %s'%(idx,datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
                     except Exception as e:
                         print("Exception: %s %s" % (e, url))
                     finally:
                         inq.task_done()
 
+class dashboard(tornado.web.RequestHandler):
+    async def get(self):
+        qsize = inq.qsize();
+        self.write({'fetch_queue_opacity':qsize})
+        
 class MainHandler(tornado.web.RequestHandler):
     def prepare(self):
         if 'Content-Type' not in self.request.headers:
@@ -68,12 +99,14 @@ class MainHandler(tornado.web.RequestHandler):
         #request = ApplicationContext.getContext().getInstance( p_name='var.application.urlRequest')
         #print('reqeust incoming...%s'%(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
         await inq.put(self.args);
+        print('[%s] -- put message into queue'%(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
         self.write('Gotta')
         
 def Main(p_command=None):        
         properties = ApplicationProperties(p_command)
         #dlist = dashboard.populate() + [ (RequestMapping.submit_fetch_url_task, MainHandler)]
-        application = tornado.web.Application([ (RequestMapping.submit_fetch_url_task, MainHandler),])
+        application = tornado.web.Application([ (RequestMapping.submit_fetch_url_task, MainHandler),
+                                                                                   (RequestMapping.get_current_fetch_worker_queue_num, dashboard), ])
         application.listen(properties.getProperty(p_key='server.port'))
         
         workers = gen.multi([worker(idx) for idx in range(int(properties.getProperty(p_key='application.worker.fetchUrl.num')))])
