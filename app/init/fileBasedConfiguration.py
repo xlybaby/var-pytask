@@ -10,8 +10,10 @@ class ApplicationProperties(object):
         if( os.path.exists( self.__project_path + '/application.properties' ) ):
             file = open(self.__project_path + '/application.properties', 'r')
             for line in file.readlines():
-                pair = line.split("=")
-                self.__properties[pair[0]] = pair[1].strip('\n\r\t ')
+                if len(line.strip()) > 0 and not line.startswith('#') :
+                    pair = line.split("=")
+                    if len(pair) == 2:
+                        self.__properties[pair[0]] = pair[1].strip('\n\r\t ')
         
         if p_command:
             for item in p_command.items():
