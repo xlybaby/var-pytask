@@ -20,47 +20,21 @@ from module.console.dashboard import dashboard
 inq = queues.Queue()
 vols=[]
 
-async def async_fetch_https(url,scenarioId,userId,templateId,idx):
-    print('[%s] async_fetch_https | worker[%d] | scenario[%s] | url[%s]'%(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), idx, scenarioId, url))    
+async def async_fetch_https(url,idx):
+    print('[%s] async_fetch_https | worker[%d] |  | url[%s]'%(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), idx, url))    
     header = {
         #"User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/47.0.2526.111 Safari/537.36"
         "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) VAR/1.0.0.1"
     }
-    props = ApplicationContext.getContext().getInstance( p_name='var.application.configuration' )
-    datadir = props.getProperty(p_key='application.persistence.rootdir')
+    
     http_client = httpclient.AsyncHTTPClient()
-    contentFile = datadir+"/"+scenarioId+datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+    
     try:
         response = await http_client.fetch(url,method='GET',headers=header)
+        return response.body
     except Exception as e:
         print("Error: %s" % e)
-    else:
-        uhash = hash(url)
-        meta = open(vols[uhash%len(vols)]+"/"+scenarioId+datetime.datetime.now().strftime('%Y%m%d%H%M%S')+".meta", 'wb+')
-        print(meta)
-        meta.write(bytes("timestamp="+datetime.datetime.now().strftime('%Y%m%d%H%M%S'), encoding='utf-8'))
-        meta.write(bytes('\n', encoding='utf-8'))
-        meta.write(bytes("workerId=worker-"+str(idx), encoding='utf-8'))
-        meta.write(bytes('\n', encoding='utf-8'))
-        meta.write(bytes("src="+url, encoding='utf-8'))
-        meta.write(bytes('\n', encoding='utf-8'))
-        meta.write(bytes("robotsTxt=", encoding='utf-8'))
-        meta.write(bytes('\n', encoding='utf-8'))
-        meta.write(bytes("fetchTime=", encoding='utf-8'))
-        meta.write(bytes('\n', encoding='utf-8'))
-        meta.write(bytes("htmlPath="+contentFile, encoding='utf-8'))
-        meta.write(bytes('\n', encoding='utf-8'))
-        meta.write(bytes("userId="+userId, encoding='utf-8'))
-        meta.write(bytes('\n', encoding='utf-8'))
-        meta.write(bytes("scenarioId="+scenarioId, encoding='utf-8'))
-        meta.write(bytes('\n', encoding='utf-8'))
-        meta.write(bytes("templateId="+templateId, encoding='utf-8'))
-
-        meta.close()
-        
-        fp = open(contentFile, 'wb+')
-        fp.write(response.body)
-        fp.close()
+        return None
         
 async def fetch_https(url,scenarioId,userId,templateId,idx):
     #if scenarioId == 'sid-003' or scenarioId == 'sid-007' or scenarioId == 'sid-0013' or scenarioId == 'sid-0016':
@@ -88,11 +62,14 @@ async def fetch_https(url,scenarioId,userId,templateId,idx):
         fp.write(response.data)
 
 async def worker(idx):
+    props = ApplicationContext.getContext().getInstance( p_name='var.application.configuration' )
+    datadir = props.getProperty(p_key='application.persistence.rootdir')
     async for task in inq:
                     url = task['url']
                     scenarioId  = task['scenarioId']
                     userId  = task['userId']
                     templateId  = task['templateId']
+                    
                     if url is None:
                         return
                     try:
@@ -100,9 +77,29 @@ async def worker(idx):
                         #print('worker-%d begin fetch url(%s) - %s'%(idx, url, datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
                         #await gen.sleep(5)
                         #await fetch_https(url,scenarioId,idx)
-                        await async_fetch_https(url,scenarioId,userId,templateId,idx)
+                        body = await async_fetch_https(url,idx)
                         print('[%s] fetch_https ends | worker[%d] | scenario[%s] | url[%s]'%(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), idx, scenarioId, url))    
-
+                        
+                        contentFile = datadir+"/"+scenarioId+datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+                        uhash = hash(url)
+                        meta = open(vols[uhash%len(vols)]+"/"+scenarioId+datetime.datetime.now().strftime('%Y%m%d%H%M%S')+".meta", 'wb+')
+                        print(meta)
+                        meta.write(bytes("task="+json.dumps(task), encoding='utf-8'))
+                        meta.write(bytes('\n', encoding='utf-8'))
+                        meta.write(bytes("workerId=worker-"+str(idx), encoding='utf-8'))
+                        meta.write(bytes('\n', encoding='utf-8'))
+                        meta.write(bytes("robotsTxt=", encoding='utf-8'))
+                        meta.write(bytes('\n', encoding='utf-8'))
+                        meta.write(bytes("fetchTime=", encoding='utf-8'))
+                        meta.write(bytes('\n', encoding='utf-8'))
+                        meta.write(bytes("htmlPath="+contentFile, encoding='utf-8'))
+                        meta.write(bytes('\n', encoding='utf-8'))
+                        
+                        meta.close()
+                        
+                        fp = open(contentFile, 'wb+')
+                        fp.write(body)
+                        fp.close()
                         #print('worker-%d end fetch url - %s'%(idx,datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
                     except Exception as e:
                         print("Exception: %s %s" % (e, url))
