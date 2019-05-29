@@ -35,7 +35,24 @@ async def async_fetch_https(url,idx):
     except Exception as e:
         print("Error: %s" % e)
         return None
-        
+
+async def async_assign(task, content):    
+    http_client = httpclient.AsyncHTTPClient()
+    try:
+        header = {
+        #"User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/47.0.2526.111 Safari/537.36"
+        "Content-Type": "text/plain;charset=gb2312"
+    }
+        #rbody=bytes.decode(content,encoding='gb2312')
+        #print(rbody)
+        preLen = '000000'
+        preLen = preLen[ 0 : 6-len(str(len(task))) ] + str(len(task))
+        #print('assign body: ', preLen+task+rbody)
+        response = await http_client.fetch('http://localhost:8088/sfut', method='POST', headers=header, body=bytes(preLen+task, encoding='gb2312')+content)
+        print( 'Assign to next node', response.body )
+    except Exception as e:
+        print("Error: %s" % e)
+         
 async def fetch_https(url,scenarioId,userId,templateId,idx):
     #if scenarioId == 'sid-003' or scenarioId == 'sid-007' or scenarioId == 'sid-0013' or scenarioId == 'sid-0016':
      #   await gen.sleep(15)
@@ -79,27 +96,28 @@ async def worker(idx):
                         #await fetch_https(url,scenarioId,idx)
                         body = await async_fetch_https(url,idx)
                         print('[%s] fetch_https ends | worker[%d] | scenario[%s] | url[%s]'%(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), idx, scenarioId, url))    
-                        
-                        contentFile = datadir+"/"+scenarioId+datetime.datetime.now().strftime('%Y%m%d%H%M%S')
-                        uhash = hash(url)
-                        meta = open(vols[uhash%len(vols)]+"/"+scenarioId+datetime.datetime.now().strftime('%Y%m%d%H%M%S')+".meta", 'wb+')
-                        print(meta)
-                        meta.write(bytes("task="+json.dumps(task), encoding='utf-8'))
-                        meta.write(bytes('\n', encoding='utf-8'))
-                        meta.write(bytes("workerId=worker-"+str(idx), encoding='utf-8'))
-                        meta.write(bytes('\n', encoding='utf-8'))
-                        meta.write(bytes("robotsTxt=", encoding='utf-8'))
-                        meta.write(bytes('\n', encoding='utf-8'))
-                        meta.write(bytes("fetchTime=", encoding='utf-8'))
-                        meta.write(bytes('\n', encoding='utf-8'))
-                        meta.write(bytes("htmlPath="+contentFile, encoding='utf-8'))
-                        meta.write(bytes('\n', encoding='utf-8'))
-                        
-                        meta.close()
-                        
-                        fp = open(contentFile, 'wb+')
-                        fp.write(body)
-                        fp.close()
+                        await async_assign(task=json.dumps(task), content=body)
+                        print('[%s] content assigned | worker[%d] | scenario[%s] | url[%s]'%(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), idx, scenarioId, url))
+#                         contentFile = datadir+"/"+scenarioId+datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+#                         uhash = hash(url)
+#                         meta = open(vols[uhash%len(vols)]+"/"+scenarioId+datetime.datetime.now().strftime('%Y%m%d%H%M%S')+".meta", 'wb+')
+#                         print(meta)
+#                         meta.write(bytes("task="+json.dumps(task), encoding='utf-8'))
+#                         meta.write(bytes('\n', encoding='utf-8'))
+#                         meta.write(bytes("workerId=worker-"+str(idx), encoding='utf-8'))
+#                         meta.write(bytes('\n', encoding='utf-8'))
+#                         meta.write(bytes("robotsTxt=", encoding='utf-8'))
+#                         meta.write(bytes('\n', encoding='utf-8'))
+#                         meta.write(bytes("fetchTime=", encoding='utf-8'))
+#                         meta.write(bytes('\n', encoding='utf-8'))
+#                         meta.write(bytes("htmlPath="+contentFile, encoding='utf-8'))
+#                         meta.write(bytes('\n', encoding='utf-8'))
+#                         
+#                         meta.close()
+#                         
+#                         fp = open(contentFile, 'wb+')
+#                         fp.write(body)
+#                         fp.close()
                         #print('worker-%d end fetch url - %s'%(idx,datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
                     except Exception as e:
                         print("Exception: %s %s" % (e, url))
@@ -128,33 +146,34 @@ class MainHandler(tornado.web.RequestHandler):
         print('[%s] -- put message into queue'%(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
         self.write('Gotta')
         
-def Main(p_command=None):        
-        properties = ApplicationProperties(p_command)
-        #dlist = dashboard.populate() + [ (RequestMapping.submit_fetch_url_task, MainHandler)]
-        application = tornado.web.Application([ (RequestMapping.submit_fetch_url_task, MainHandler),
-                                                                                   (RequestMapping.get_current_fetch_worker_queue_num, dashboard), ])
-        application.listen(properties.getProperty(p_key='server.port'))
-        
-        workers = gen.multi([worker(idx) for idx in range(int(properties.getProperty(p_key='application.worker.fetchUrl.num')))])
-        ioLoop = tornado.ioloop.IOLoop.current()
+def Main(p_command=None):      
+    print('PyTask loaded!')  
+    properties = ApplicationProperties(p_command)
+    #dlist = dashboard.populate() + [ (RequestMapping.submit_fetch_url_task, MainHandler)]
+    application = tornado.web.Application([ (RequestMapping.submit_fetch_url_task, MainHandler),
+                                                                               (RequestMapping.get_current_fetch_worker_queue_num, dashboard), ])
+    application.listen(properties.getProperty(p_key='server.port'))
+    
+    workers = gen.multi([worker(idx) for idx in range(int(properties.getProperty(p_key='application.worker.fetchUrl.num')))])
+    ioLoop = tornado.ioloop.IOLoop.current()
 
-        
-        partitiondir = properties.getProperty(p_key='application.persistence.fetchdir') + '/'  + properties.getProperty(p_key='application.persistence.defaultPartition') 
-        if( os.path.exists( partitiondir ) ):
-            for vol in os.listdir( partitiondir ):
-                if vol.lower().startswith('volumn'):
-                    vols.append(partitiondir+"/"+vol)
-        print('%d volumns in %s'%(len(vols), properties.getProperty(p_key='application.persistence.defaultPartition') ))
-        #request = HttpRequest()
-        #await request.do()
-        #ApplicationContext.getContext().putInstance( p_name='var.application.inq', p_obj=inq )
-        ApplicationContext.getContext().putInstance( p_name='var.application.workers', p_obj=workers )
-        ApplicationContext.getContext().putInstance( p_name='var.application.configuration', p_obj=properties )
-        ApplicationContext.getContext().putInstance( p_name='var.application.webApplication', p_obj=application )
-        #ApplicationContext.getContext().putInstance( p_name='var.application.urlRequest', p_obj=request )
-        ApplicationContext.getContext().putInstance( p_name='var.ioloop.current', p_obj=ioLoop )
-        ioLoop.start()
-        #ioLoop.run_sync()
+    
+    partitiondir = properties.getProperty(p_key='application.persistence.fetchdir') + '/'  + properties.getProperty(p_key='application.persistence.defaultPartition') 
+    if( os.path.exists( partitiondir ) ):
+        for vol in os.listdir( partitiondir ):
+            if vol.lower().startswith('volumn'):
+                vols.append(partitiondir+"/"+vol)
+    print('%d volumns in %s'%(len(vols), properties.getProperty(p_key='application.persistence.defaultPartition') ))
+    #request = HttpRequest()
+    #await request.do()
+    #ApplicationContext.getContext().putInstance( p_name='var.application.inq', p_obj=inq )
+    ApplicationContext.getContext().putInstance( p_name='var.application.workers', p_obj=workers )
+    ApplicationContext.getContext().putInstance( p_name='var.application.configuration', p_obj=properties )
+    ApplicationContext.getContext().putInstance( p_name='var.application.webApplication', p_obj=application )
+    #ApplicationContext.getContext().putInstance( p_name='var.application.urlRequest', p_obj=request )
+    ApplicationContext.getContext().putInstance( p_name='var.ioloop.current', p_obj=ioLoop )
+    ioLoop.start()
+    #ioLoop.run_sync()
  
 if __name__ == '__main__':
     urllib3.contrib.pyopenssl.inject_into_urllib3()
