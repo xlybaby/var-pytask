@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import sys,os,json,codecs
+import sys,os,json,codecs,traceback
 import time
 import datetime
 import hashlib
@@ -7,6 +7,8 @@ import hashlib
 import urllib3
 import urllib3.contrib.pyopenssl
 import certifi
+
+from scrapy.selector import Selector 
 
 import tornado.ioloop
 import tornado.web
@@ -28,13 +30,42 @@ async def async_fetch_https(url,idx):
     }
     
     http_client = httpclient.AsyncHTTPClient()
-    
+    res = {}
+    charset = 'utf-8'
     try:
         response = await http_client.fetch(url,method='GET',headers=header)
-        return response.body
+        contentType = response.headers['Content-Type']  if 'Content-Type' in response.headers else None
+        
+        if contentType :
+            charsetIdx = contentType.lower().find('charset:')
+            if charsetIdx>=0 :
+                charset = contentType[charsetIdx+8:]
+                if charset and len(charset.strip())>0:
+                    charset = charset.strip()
+            else:
+                selector = Selector(text=response.body,type='html')    
+                chr = selector.xpath('//head/meta/@charset').get()
+                if chr and len(chr.strip()) > 0:
+                    charset = chr.strip()
+                else:
+                    chr = selector.xpath("//head/meta[contains(@http-equiv,'Content-Type')]/@content").get()#<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+                    #print(chr)
+                    if chr and len(chr.strip()) > 0:
+                        #charsetStr = str(chr, encoding='utf-8')
+                        charsetIdx = chr.lower().find('charset=')
+                        if charsetIdx>=0 :
+                            charset = chr[charsetIdx+8:]
+                            if charset and len(charset.strip())>0:
+                                charset = charset.strip()
+
+        res['body'] = response.body
     except Exception as e:
         print("Error: %s" % e)
+        traceback.print_exc(file=sys.stdout)
         return None
+    
+    res['charset'] = charset.lower()
+    return res
 
 async def async_assign(task, content):    
     http_client = httpclient.AsyncHTTPClient()
@@ -49,10 +80,10 @@ async def async_assign(task, content):
         preLen = preLen[ 0 : 6-len(str(len(task))) ] + str(len(task))
         #print('assign body: ', preLen+task+rbody)
         response = await http_client.fetch('http://localhost:8088/sfut', method='POST', headers=header, body=bytes(preLen+task, encoding='gb2312')+content)
-        print( 'Assign to next node', response.body )
+        print( '[%s] Assign to next node'%(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')), response.body )
     except Exception as e:
         print("Error: %s" % e)
-         
+        traceback.print_exc(file=sys.stdout)
 async def fetch_https(url,scenarioId,userId,templateId,idx):
     #if scenarioId == 'sid-003' or scenarioId == 'sid-007' or scenarioId == 'sid-0013' or scenarioId == 'sid-0016':
      #   await gen.sleep(15)
@@ -94,11 +125,17 @@ async def worker(idx):
                         #print('worker-%d begin fetch url(%s) - %s'%(idx, url, datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
                         #await gen.sleep(5)
                         #await fetch_https(url,scenarioId,idx)
-                        body = await async_fetch_https(url,idx)
-                        print('[%s] fetch_https ends | worker[%d] | scenario[%s] | url[%s]'%(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), idx, scenarioId, url))    
-                        await async_assign(task=json.dumps(task), content=body)
-                        print('[%s] content assigned | worker[%d] | scenario[%s] | url[%s]'%(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), idx, scenarioId, url))
+                        res = await async_fetch_https(url,idx)
+                        #print('[%s] fetch_https ends | worker[%d] | scenario[%s] | url[%s]'%(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), idx, scenarioId, url))    
+                        task['charset'] = res['charset']
+                        await async_assign(task=json.dumps(task), content=res['body'])
+                        #print('[%s] content assigned | worker[%d] | scenario[%s] | url[%s]'%(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), idx, scenarioId, url))
+#                         print('scenario[%s]\'s charset[%s]'%(scenarioId, res['charset']))
 #                         contentFile = datadir+"/"+scenarioId+datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+#                         fp = open(contentFile, 'wb+')
+#                         fp.write(res['body'])
+#                         fp.close()
+                        
 #                         uhash = hash(url)
 #                         meta = open(vols[uhash%len(vols)]+"/"+scenarioId+datetime.datetime.now().strftime('%Y%m%d%H%M%S')+".meta", 'wb+')
 #                         print(meta)
@@ -115,12 +152,11 @@ async def worker(idx):
 #                         
 #                         meta.close()
 #                         
-#                         fp = open(contentFile, 'wb+')
-#                         fp.write(body)
-#                         fp.close()
+                        
                         #print('worker-%d end fetch url - %s'%(idx,datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
                     except Exception as e:
                         print("Exception: %s %s" % (e, url))
+                        traceback.print_exc(file=sys.stdout)
                     finally:
                         inq.task_done()
 
