@@ -177,9 +177,9 @@ class MainHandler(tornado.web.RequestHandler):
 
     async def post(self):
         #request = ApplicationContext.getContext().getInstance( p_name='var.application.urlRequest')
-        #print('reqeust incoming...%s'%(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+        print('reqeust incoming...%s'%(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
         await inq.put(self.args);
-        print('[%s] -- put message into queue'%(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+        #print('[%s] -- put message into queue'%(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
         self.write('Gotta')
         
 def Main(p_command=None):      
